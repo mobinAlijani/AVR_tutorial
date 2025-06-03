@@ -1,74 +1,10 @@
 //===========================================================================================
-// Project: ATmega32A Timer0 Interrupt Example          
+// Project: ATmega32A Debounced Button with Timer0          
 // Compiler: avr-gcc
 // Target microcontroller: ATmega32A
 // This code is for an ATmega32A microcontroller
 // by [mobin Alijani]
 // Date: 2023-10-01
-//============================================TIMER0========================================
-
-//TCCR0- timer/counter control register
-//    7      6      5        4       3       2       1      0
-//  FOC0 | WGM00 | WGM01 | COM00 | COM01 | CS02  | CS01  | CS00 |      addres 0x53
-
-
-//WGM0[1:0] - Waveform Generation Mode
-//             |  WGM01 | WGM00 |
-// Normal mode:      0  |   0 
-// CTC mode:         0  |   1
-// Fast PWM mode:    1  |   0
-// PWM:              1  |   1
-
-
-// COM0[1:0] - Compare Output Mode
-// 0 0: Normal port operation, OC0 disconnected
-// 0 1: Toggle OC0 on Compare Match
-// 1 0: Clear OC0 on Compare Match
-// 1 1: Set OC0 on Compare Match
-
-
-// CS0[2:0] - Clock Select
-// 0 0 0: No clock source (Timer/Counter stopped)
-// 0 0 1: clkI/O/1 (No prescaling)
-// 0 1 0: clkI/O/8 (From prescaler)
-// 0 1 1: clkI/O/64 (From prescaler)
-// 1 0 0: clkI/O/256 (From prescaler)
-// 1 0 1: clkI/O/1024 (From prescaler)  
-// 1 1 0: External clock source on T0 pin, clock on falling edge
-// 1 1 1: External clock source on T0 pin, clock on rising edge
-
-//============================================TCCR0========================================
-
-//TCNT0 - Timer/Counter Register
-//the timer/counter register TCNT0 can hold 0 to 255 
-
-//============================================TIMSK========================================
-
-//TIMSK - Timer/Counter Interrupt Mask Register
-//    7      6         5        4       3       2       1       0
-//  OCIE2 | TOIE2 | OCIE1B | OCIE1A | TOIE1 | OCIE0 | TOIE0 | TOIE2 |      address 0x59
-
-//OCIE0  - Output Compare Match Interrupt Enable for Timer/Counter0
-//TOIE0  - Timer/Counter0 Overflow Interrupt Enable
-//OCIE1A - Output Compare Match A Interrupt Enable for Timer/Counter1
-//OCIE1B - Output Compare Match B Interrupt Enable for Timer/Counter1
-//TOIE1  - Timer/Counter1 Overflow Interrupt Enable
-//OCIE2  - Output Compare Match Interrupt Enable for Timer/Counter2
-//TOIE2  - Timer/Counter2 Overflow Interrupt Enable
-
-//============================================TIFR========================================
-
-//TIFR - Timer/Counter Interrupt Flag Register
-//    7      6      5      4      3      2      1      0       
-//  OCF2 | TOV2 | OCF1B | OCF1A | TOV1 | OCF0 | TOV0 | TOV2 |      address 0x58
-
-//OCF0  - Output Compare Flag for Timer/Counter0
-//TOV0  - Timer/Counter0 Overflow Flag
-//OCF1A - Output Compare Flag A for Timer/Counter1  
-//OCF1B - Output Compare Flag B for Timer/Counter1
-//TOV1  - Timer/Counter1 Overflow Flag
-//OCF2  - Output Compare Flag for Timer/Counter2
-//TOV2  - Timer/Counter2 Overflow Flag
 
 //============================================libraries========================================
 #include <avr/io.h>
@@ -77,7 +13,7 @@
 //============================================Defines========================================
 #define F_CPU 8000000UL // Define CPU frequency as 8 MHz
 #define TIMER0_PRESCALER 64 // Define prescaler for Timer0
-#define delayTime 1000 // Define delay time in milliseconds
+#define delayTime 50 // Define delay time in milliseconds
 // This will toggle an LED every 1000 milliseconds (1 second)
 
 //============================================global variables========================================
@@ -85,11 +21,33 @@
 unsigned long previous = 0;
 unsigned long millisCounter = 0;
 
+unsigned char ReadButtonState = 0;
+unsigned char lastButtonState = 0;
+unsigned char ButtonState = 0;
+
+struct deBouncd_Button
+{
+    unsigned long previous; // Previous time in milliseconds
+    unsigned long millisCounter; // Millis counter for debouncing
+    unsigned char ReadButtonState; // Current state of the button
+    unsigned char lastButtonState; // Last state of the button
+    unsigned char ButtonState; // Debounced button state
+} Button1 =
+{
+    .previous = 0,
+    .millisCounter = 0,
+    .ReadButtonState = 0,
+    .lastButtonState = 0,
+    .ButtonState = 0
+};
+
+
 
 //============================================ISRs========================================
 // Timer0 overflow interrupt service routine
 ISR(TIMER0_COMP_vect) {
     millisCounter++;
+    Button1.millisCounter++; // Increment the millis counter
 }
 
 //============================================functions========================================
@@ -142,15 +100,37 @@ int main(void){
 
     PORTB &= ~(1 << 1); // Ensure PB1 is low initially
 
+    PORTD |= (1 << 6); // Enable pull-up resistor on PD6 (if used as input)
+    DDRD &= ~(1 << 6); // Set PD6 as input (if used as input)
+
     sei(); // Enable global interrupts
 
-    previous = millis(); // Initialize previous time
+    Button1.previous = millis(); // Initialize the previous time
+    Button1.millisCounter = 0; // Initialize the millis counters
+    // Main loop
     while (1)
     {
-        if(millis() - previous >= delayTime){
-            PORTB ^= (1 << 1); // Toggle PB1
-            previous = millis(); // Update previous time
+        Button1.ReadButtonState = (PIND & (1 << 6));
+
+        if(Button1.ReadButtonState != Button1.lastButtonState) { // Check if the button state has changed
+            Button1.lastButtonState = Button1.ReadButtonState; // Update the last button states
+            Button1.previous = millis();    
         }
+
+
+        if(millis() - Button1.previous >= delayTime){
+
+            if(Button1.ButtonState != Button1.ReadButtonState){
+                Button1.ButtonState = Button1.ReadButtonState;
+                if(Button1.ButtonState == 0){ // Button pressed (assuming active low)
+                    PORTB ^= (1 << 1); // Toggle PB1 (LED)
+                }
+            }
+
+            Button1.previous =millis(); // Update previous time
+        }
+
+        Button1.lastButtonState = Button1.ReadButtonState; // Update the last button state for the next iteration
     }
     
 }

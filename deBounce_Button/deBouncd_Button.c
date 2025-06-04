@@ -17,6 +17,10 @@
 #define TIMER0_PRESCALER 64 // Define prescaler for Timer0
 #define delayTime 50 // Define debounce delay time in milliseconds
 
+#define LED_Toggle() PORTB ^= (1 << PB1)   // Toggle LED on PB1
+#define BTN_Pin  ((PIND & (1 << PD6)) != 0)  // for read button pin 
+
+
 //============================================global variables========================================
 volatile unsigned long millisCounter = 0; // Counter for milliseconds, shared with ISR
 
@@ -65,6 +69,16 @@ void initTimer0(void)
     TCNT0 = 0;
 }
 
+// Initialize and Config PORTs
+void initPORT(void)
+{
+    DDRB |= (1 << PB1);    // Set PB1 as output (LED)
+    PORTB &= ~(1 << PB1);  // LED off initially
+
+    DDRD &= ~(1 << PD6);   // Set PD6 as input (Button)
+    PORTD |= (1 << PD6);   // Enable pull-up resistor on PD6
+}
+
 // Returns current time in milliseconds
 unsigned long millis(void)
 {
@@ -75,16 +89,18 @@ unsigned long millis(void)
     return ms;
 }
 
+
+// Check if the specified delay has elapsed, handling timer overflow
+unsigned char isTimeElapsed(unsigned long current, unsigned long previous, unsigned char delay) {
+    return (current - previous) >= delay || current < previous;
+}
+
 //==============================================main code========================================
 int main(void)
 {
     initTimer0(); // Initialize Timer0
 
-    DDRB |= (1 << PB1);    // Set PB1 as output (LED)
-    PORTB &= ~(1 << PB1);  // LED off initially
-
-    DDRD &= ~(1 << PD6);   // Set PD6 as input (Button)
-    PORTD |= (1 << PD6);   // Enable pull-up resistor on PD6
+    initPORT();  //Initialize PORTs
 
     sei(); // Enable global interrupts
 
@@ -94,7 +110,7 @@ int main(void)
     while (1)
     {
         // Read button state (active-low: 0 = pressed, 1 = released)
-        Button1.ReadButtonState = (PIND & (1 << PD6)) ? 0 : 1;
+        Button1.ReadButtonState = (!BTN_Pin) ? 0 : 1;
 
         // Detect button state change
         if (Button1.ReadButtonState != Button1.lastButtonState) {
@@ -102,14 +118,14 @@ int main(void)
         }
 
         // Check if debounce delay has passed or timer overflow occurred
-        if ((millis() - Button1.previous >= Button1.debounceDelay) || (millis() < Button1.previous))
+        if (isTimeElapsed(millis(),Button1.previous,Button1.debounceDelay))
         {
             // Update debounced state if changed
             if (Button1.ButtonState != Button1.ReadButtonState)
             {
                 Button1.ButtonState = Button1.ReadButtonState;
                 if (Button1.ButtonState) { // Button pressed (active-low)
-                    PORTB ^= (1 << PB1); // Toggle LED on PB1
+                    LED_Toggle();
                 }
             }
             Button1.previous = millis(); // Update previous time

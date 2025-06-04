@@ -106,6 +106,7 @@ unsigned char isTimeElapsed(unsigned long current, unsigned long previous, unsig
     return (current - previous) >= delay || current < previous;
 }
 
+
 //==============================================main code========================================
 int main(void)
 {
@@ -121,7 +122,7 @@ int main(void)
     while (1)
     {
         // Read button state (active-low: 0 = pressed, 1 = released)
-        Button1.ReadButtonState = (!BTN_Pin) ? 0 : 1;
+        Button1.ReadButtonState = (BTN_Pin) ? 0 : 1;
 
         // Detect button state change
         if (Button1.ReadButtonState != Button1.lastButtonState) {

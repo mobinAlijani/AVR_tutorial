@@ -31,14 +31,11 @@ struct DebouncedButton
     unsigned char lastButtonState; // Last state of the button
     unsigned char ButtonState; // Debounced button state
     unsigned char debounceDelay; // Debounce delay in milliseconds
-} Button1 =
-{
-    .previous = 0,
-    .ReadButtonState = 0,
-    .lastButtonState = 0,
-    .ButtonState = 0,
-    .debounceDelay = delayTime        
-};
+    volatile unsigned char* port; // Pointer to PORT register (e.g., &PORTB)
+    volatile unsigned char* pin;  // Pointer to PIN register (e.g., &PIND)
+    unsigned char buttonPin;      // Button pin number (e.g., PD6)
+    unsigned char ledPin;         // LED pin number (e.g., PB1)
+}Button1;
 
 //============================================ISRs========================================
 // Timer0 compare match interrupt service routine
@@ -70,13 +67,27 @@ void initTimer0(void)
 }
 
 // Initialize and Config PORTs
-void initPORT(void)
+void initButton(struct DebouncedButton* btn, volatile unsigned char* port, volatile unsigned char* pin
+    ,unsigned char buttonPin, unsigned char ledPin, unsigned char debounceDelay)
 {
-    DDRB |= (1 << PB1);    // Set PB1 as output (LED)
-    PORTB &= ~(1 << PB1);  // LED off initially
+    btn->previous=0;
+    btn->ReadButtonState=0;
+    btn->ButtonState=0;
+    btn->lastButtonState=0;
 
-    DDRD &= ~(1 << PD6);   // Set PD6 as input (Button)
-    PORTD |= (1 << PD6);   // Enable pull-up resistor on PD6
+    btn->debounceDelay=debounceDelay;
+    btn->port = port;
+    btn->pin = pin;
+    btn->buttonPin = buttonPin;
+    btn->ledPin = ledPin;
+
+    // Configure button pin as input with pull-up
+    DDRD &= ~(1 << buttonPin); // Set buttonPin as input
+    *port |= (1 << buttonPin); // Enable pull-up resistor
+
+    // Configure LED pin as output
+    DDRB |= (1 << ledPin); // Set ledPin as output
+    *port &= ~(1 << ledPin); // LED off initially
 }
 
 // Returns current time in milliseconds
@@ -100,7 +111,7 @@ int main(void)
 {
     initTimer0(); // Initialize Timer0
 
-    initPORT();  //Initialize PORTs
+    initButton(&Button1,&PORTD,&PIND,PD6,PB1,delayTime);
 
     sei(); // Enable global interrupts
 

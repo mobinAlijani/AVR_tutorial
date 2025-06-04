@@ -2,9 +2,11 @@
 // Project: ATmega32A Debounced Button with Timer0          
 // Compiler: avr-gcc
 // Target microcontroller: ATmega32A
-// This code is for an ATmega32A microcontroller
-// by [mobin Alijani]
+// This code toggles an LED on PB1 when a button on PD6 (with pull-up resistor) is pressed.
+// Button is active-low (pressed = 0, released = 1).
+// Author: [mobin Alijani]
 // Date: 2023-10-01
+// Modified: 2025-06-04 
 
 //============================================libraries========================================
 #include <avr/io.h>
@@ -13,124 +15,106 @@
 //============================================Defines========================================
 #define F_CPU 8000000UL // Define CPU frequency as 8 MHz
 #define TIMER0_PRESCALER 64 // Define prescaler for Timer0
-#define delayTime 50 // Define delay time in milliseconds
-// This will toggle an LED every 1000 milliseconds (1 second)
+#define delayTime 50 // Define debounce delay time in milliseconds
 
 //============================================global variables========================================
+volatile unsigned long millisCounter = 0; // Counter for milliseconds, shared with ISR
 
-unsigned long previous = 0;
-unsigned long millisCounter = 0;
-
-unsigned char ReadButtonState = 0;
-unsigned char lastButtonState = 0;
-unsigned char ButtonState = 0;
-
-struct deBouncd_Button
+struct DebouncedButton
 {
     unsigned long previous; // Previous time in milliseconds
-    unsigned long millisCounter; // Millis counter for debouncing
     unsigned char ReadButtonState; // Current state of the button
     unsigned char lastButtonState; // Last state of the button
     unsigned char ButtonState; // Debounced button state
+    unsigned char debounceDelay; // Debounce delay in milliseconds
 } Button1 =
 {
     .previous = 0,
-    .millisCounter = 0,
     .ReadButtonState = 0,
     .lastButtonState = 0,
-    .ButtonState = 0
+    .ButtonState = 0,
+    .debounceDelay = delayTime        
 };
 
-
-
 //============================================ISRs========================================
-// Timer0 overflow interrupt service routine
+// Timer0 compare match interrupt service routine
 ISR(TIMER0_COMP_vect) {
-    millisCounter++;
-    Button1.millisCounter++; // Increment the millis counter
+    millisCounter++; // Increment millisecond counter
 }
 
 //============================================functions========================================
 // Timer0 initialization function
-// This function sets up Timer0 in CTC mode with a prescaler of 64
+// Sets up Timer0 in CTC mode with a prescaler of 64 to generate 1ms interrupts
 void initTimer0(void)
 { 
-    //set output compare mode to CTC (Clear Timer on Compare Match) 
+    TCCR0 = 0;
+
+    // Set CTC mode (Clear Timer on Compare Match)
     TCCR0 |= (1<<WGM01);
-    TCCR0 &= ~(1<<WGM00); // CTC mode
+    TCCR0 &= ~(1<<WGM00);
 
-    //set the prescaler to 64
-    TCCR0 |= (1<<CS01) | (1<<CS00); // Set CS02 and CS01 to 1, CS00 remains 0
+    // Set prescaler to 64
+    TCCR0 |= (1<<CS01) | (1<<CS00);
 
-    //enable the timer overflow interrupt
-    TIMSK |= (1<<OCIE0); // Enable Output Compare Match Interrupt for Timer0
+    // Enable Output Compare Match Interrupt
+    TIMSK |= (1<<OCIE0);
 
-
-    //set the output compare register to 125
+    // Set output compare register for 1ms interrupts
+    // OCR0 = (F_CPU / (Prescaler * Desired_Frequency)) - 1 = (8000000 / (64*1000)) - 1 = 124
     OCR0 = 124;
-    TCNT0 = 0; 
-    // This will generate an interrupt every 1 ms with a 16 MHz clock and prescaler of 64
-    //OCR0 = 1-(interrupt_CPU*time)/prescaler
-    //125 = 1 - (8000000 * 0.001) / 64
-
+    TCNT0 = 0;
 }
 
-//millis function
-unsigned long millis(void){
-
+// Returns current time in milliseconds
+unsigned long millis(void)
+{
     unsigned long ms;
-
-    // Disable interrupts to ensure atomic access to millisCounter
-    cli();
+    cli(); // Disable interrupts for atomic access
     ms = millisCounter;
     sei(); // Re-enable interrupts
-
     return ms;
-
 }
 
-
 //==============================================main code========================================
+int main(void)
+{
+    initTimer0(); // Initialize Timer0
 
-int main(void){
+    DDRB |= (1 << PB1);    // Set PB1 as output (LED)
+    PORTB &= ~(1 << PB1);  // LED off initially
 
-    initTimer0();
-
-    DDRB |= (1 << 1); // Set PB1 as output (for example, to toggle an LED)
-
-    PORTB &= ~(1 << 1); // Ensure PB1 is low initially
-
-    PORTD |= (1 << 6); // Enable pull-up resistor on PD6 (if used as input)
-    DDRD &= ~(1 << 6); // Set PD6 as input (if used as input)
+    DDRD &= ~(1 << PD6);   // Set PD6 as input (Button)
+    PORTD |= (1 << PD6);   // Enable pull-up resistor on PD6
 
     sei(); // Enable global interrupts
 
-    Button1.previous = millis(); // Initialize the previous time
-    Button1.millisCounter = 0; // Initialize the millis counters
+    Button1.previous = millis(); // Initialize previous time
+
     // Main loop
     while (1)
     {
-        Button1.ReadButtonState = (PIND & (1 << 6));
+        // Read button state (active-low: 0 = pressed, 1 = released)
+        Button1.ReadButtonState = (PIND & (1 << PD6)) ? 0 : 1;
 
-        if(Button1.ReadButtonState != Button1.lastButtonState) { // Check if the button state has changed
-            Button1.lastButtonState = Button1.ReadButtonState; // Update the last button states
-            Button1.previous = millis();    
+        // Detect button state change
+        if (Button1.ReadButtonState != Button1.lastButtonState) {
+            Button1.previous = millis(); // Record time of state change
         }
 
-
-        if(millis() - Button1.previous >= delayTime){
-
-            if(Button1.ButtonState != Button1.ReadButtonState){
+        // Check if debounce delay has passed or timer overflow occurred
+        if ((millis() - Button1.previous >= Button1.debounceDelay) || (millis() < Button1.previous))
+        {
+            // Update debounced state if changed
+            if (Button1.ButtonState != Button1.ReadButtonState)
+            {
                 Button1.ButtonState = Button1.ReadButtonState;
-                if(Button1.ButtonState == 0){ // Button pressed (assuming active low)
-                    PORTB ^= (1 << 1); // Toggle PB1 (LED)
+                if (Button1.ButtonState) { // Button pressed (active-low)
+                    PORTB ^= (1 << PB1); // Toggle LED on PB1
                 }
             }
-
-            Button1.previous =millis(); // Update previous time
+            Button1.previous = millis(); // Update previous time
         }
 
-        Button1.lastButtonState = Button1.ReadButtonState; // Update the last button state for the next iteration
+        Button1.lastButtonState = Button1.ReadButtonState; // Update last button state
     }
-    
 }
